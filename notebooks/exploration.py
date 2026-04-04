@@ -38,3 +38,9 @@ print(f"\n{'=' * 50}")
 print("Exploration terminee !")
 print("Prochain lab : entrainer un modele ML")
 print(f"{'=' * 50}")
+
+print(f"\n--- Patients par sexe et par diagnostic ---")
+sexe_diag = df.groupby(["sexe", "diagnostic"]).size()
+for (sexe, diag), count in sexe_diag.items():
+    label = "Homme" if sexe == "M" else "Femme"
+    print(f"  {label} | {diag} : {count} patients")
