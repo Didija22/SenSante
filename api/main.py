@@ -4,6 +4,8 @@ import numpy as np
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from groq import Groq
@@ -88,11 +90,10 @@ else:
     print("ATTENTION : GROQ_API_KEY non trouvee. /explain sera desactive.")
 
 
-# --- SYSTEM PROMPT MEDICAL MIS À JOUR (Exercice 1) ---
+# --- SYSTEM PROMPT MEDICAL ---
 SYSTEM_PROMPT = """Tu es un assistant medical senegalais.
 Tu recois un diagnostic et des donnees patient.
 Explique le resultat en francais simple, comme un medecin parlerait a son patient.
-Si la temperature du patient est superieure ou egale a 38.5°C, insiste bien sur le fait que la fievre est elevee et qu'il faut agir vite.
 Sois rassurant mais recommande toujours une consultation medicale.
 Maximum 3 phrases.
 Ne fais JAMAIS de diagnostic toi-meme.
@@ -207,3 +208,14 @@ def explain(data: ExplainInput):
         explication = f"Erreur lors de l'appel au LLM : {str(e)}"
 
     return ExplainOutput(explication=explication)
+
+
+# --- Configuration pour servir les fichiers statiques (Lab 6) ---
+
+# Monter le dossier static pour qu'il soit accessible via /static
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Route principale qui renvoie directement le fichier HTML
+@app.get("/")
+def read_index():
+    return FileResponse("static/index.html")
