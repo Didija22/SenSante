@@ -8,7 +8,6 @@
 </head>
 <body class="bg-gray-50 min-h-screen">
 
-  <!-- Header -->
   <header class="bg-blue-600 text-white py-4 shadow-lg">
     <div class="max-w-4xl mx-auto px-4">
       <h1 class="text-2xl font-bold">SenSante</h1>
@@ -16,11 +15,9 @@
     </div>
   </header>
 
-  <!-- Contenu principal -->
   <main class="max-w-4xl mx-auto px-4 py-8">
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-      <!-- Colonne gauche : formulaire -->
       <div id="form-section" class="bg-white rounded-xl shadow-md p-6">
         <h2 class="text-xl font-bold text-gray-800 mb-4">Symptomes du patient</h2>
 
@@ -93,7 +90,6 @@
         </button>
       </div>
 
-      <!-- Colonne droite : resultat -->
       <div id="result-section">
         <div class="bg-white rounded-xl shadow-md p-6 text-center text-gray-400">
           <p class="text-4xl mb-3">🩺</p>
@@ -104,7 +100,6 @@
 
     </div>
 
-    <!-- Exercice 2 : Historique des consultations -->
     <div id="historique-section" class="mt-8 hidden">
       <h3 class="text-lg font-bold text-gray-700 mb-3">📂 Dernières consultations</h3>
       <div class="bg-white rounded-xl shadow-md overflow-hidden">
@@ -125,7 +120,6 @@
 
   </main>
 
-  <!-- Footer -->
   <footer class="text-center text-gray-400 text-sm py-4">
     SenSante v0.3 - ESP/UCAD - L2 GLSI 2026
   </footer>
@@ -217,6 +211,67 @@
             <p class="text-sm text-gray-700">${r.message}</p>
           </div>
         </div>`;
+
+      // NOUVEAU : On lance automatiquement l'appel au LLM après l'affichage du diagnostic initial
+      demanderExplication(r);
+    }
+
+    // NOUVEAU : Fonction asynchrone pour gérer l'explication Groq (Llama 3)
+    async function demanderExplication(diagnostic_data) {
+      // 1. Récupération des données du formulaire pour le prompt du LLM
+      const explainData = {
+        diagnostic: diagnostic_data.diagnostic,
+        probabilite: diagnostic_data.probabilite,
+        age: parseInt(document.getElementById("age").value),
+        sexe: document.getElementById("sexe").value,
+        temperature: parseFloat(document.getElementById("temperature").value),
+        region: document.getElementById("region").value
+      };
+
+      // 2. Ciblage de la section de résultat
+      const section = document.getElementById("result-section");
+      
+      // 3. Injection du composant d'attente (Placeholder avec effet pulse)
+      const explDiv = document.createElement("div");
+      explDiv.id = "explication-zone";
+      explDiv.innerHTML = `
+        <div class="mt-4 bg-purple-50 rounded-lg p-4 border border-purple-200">
+          <p class="text-sm text-purple-600 font-medium mb-2">Explication (Llama 3)</p>
+          <p class="text-gray-500 text-sm animate-pulse">Génération en cours...</p>
+        </div>
+      `;
+      
+      // On l'ajoute à l'intérieur du conteneur blanc du résultat
+      section.querySelector(".bg-white").appendChild(explDiv);
+
+      // 4. Requête vers l'endpoint /explain de FastAPI
+      try {
+        const response = await fetch(API_URL + "/explain", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(explainData)
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          // Remplacement du loader par la réponse du LLM
+          explDiv.innerHTML = `
+            <div class="mt-4 bg-purple-50 rounded-lg p-4 border border-purple-200">
+              <p class="text-sm text-purple-600 font-medium mb-2">Explication (Llama 3)</p>
+              <p class="text-gray-700 text-sm leading-relaxed">${result.explication}</p>
+            </div>
+          `;
+        } else {
+          throw new Error("Erreur de récupération de l'explication");
+        }
+      } catch (error) {
+        // En cas d'erreur de l'API ou réseau, dégradation gracieuse sans casser l'interface
+        explDiv.innerHTML = `
+          <div class="mt-4 bg-gray-50 rounded-lg p-3">
+            <p class="text-gray-400 text-sm">Explication non disponible actuellement.</p>
+          </div>
+        `;
+      }
     }
 
     function afficherErreur(msg) {
