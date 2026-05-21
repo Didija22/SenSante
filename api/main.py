@@ -1,10 +1,18 @@
+import os
 import joblib
 import numpy as np
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+from groq import Groq
+
+# Charger les variables d'environnement
+load_dotenv()
 
 
+# --- Schemas Pydantic ---
 
 class PatientInput(BaseModel):
     """Donnees d'entree : les symptomes d'un patient."""
@@ -28,13 +36,39 @@ class DiagnosticOutput(BaseModel):
     message: str = Field(..., description="Recommandation")
 
 
+class ExplainInput(BaseModel):
+    diagnostic: str = Field(..., description="Diagnostic predit par le modele")
+    probabilite: float = Field(..., description="Probabilite du diagnostic")
+    age: int
+    sexe: str
+    temperature: float
+    region: str
+
+
+class ExplainOutput(BaseModel):
+    explication: str = Field(..., description="Explication en francais")
+    modele_llm: str = Field(default="llama-3.1-8b-instant",
+                            description="Modele LLM utilise")
+
+
+# --- Application FastAPI ---
 
 app = FastAPI(
     title="SenSante API",
     description="Assistant pre-diagnostic medical pour le Senegal",
-    version="0.2.0"
+    version="0.3.0"
 )
-# --- Chargement du modele et des encodeurs au demarrage ---
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# --- Chargement du modele au demarrage ---
 print("Chargement du modele...")
 model = joblib.load("models/model.pkl")
 le_sexe = joblib.load("models/encoder_sexe.pkl")
@@ -43,6 +77,29 @@ feature_cols = joblib.load("models/feature_cols.pkl")
 print(f"Modele charge : {type(model).__name__}")
 print(f"Classes : {list(model.classes_)}")
 
+
+# --- Initialisation du client Groq ---
+groq_client = None
+groq_api_key = os.getenv("GROQ_API_KEY")
+if groq_api_key:
+    groq_client = Groq(api_key=groq_api_key)
+    print("Client Groq initialise.")
+else:
+    print("ATTENTION : GROQ_API_KEY non trouvee. /explain sera desactive.")
+
+
+# --- SYSTEM PROMPT MEDICAL MIS À JOUR (Exercice 1) ---
+SYSTEM_PROMPT = """Tu es un assistant medical senegalais.
+Tu recois un diagnostic et des donnees patient.
+Explique le resultat en francais simple, comme un medecin parlerait a son patient.
+Si la temperature du patient est superieure ou egale a 38.5°C, insiste bien sur le fait que la fievre est elevee et qu'il faut agir vite.
+Sois rassurant mais recommande toujours une consultation medicale.
+Maximum 3 phrases.
+Ne fais JAMAIS de diagnostic toi-meme.
+Tu expliques uniquement le diagnostic fourni."""
+
+
+# --- Routes ---
 
 @app.get("/health")
 def health_check():
@@ -55,12 +112,7 @@ def health_check():
 
 @app.post("/predict", response_model=DiagnosticOutput)
 def predict(patient: PatientInput):
-    """
-    Predire un diagnostic a partir des symptomes d'un patient.
-
-    Recoit les symptomes en JSON, renvoie le diagnostic,
-    la probabilite et une recommandation.
-    """
+    """Predire un diagnostic a partir des symptomes d'un patient."""
     # 1. Encoder les variables categoriques
     try:
         sexe_enc = le_sexe.transform([patient.sexe])[0]
@@ -107,7 +159,7 @@ def predict(patient: PatientInput):
     else:
         confiance = "faible"
 
-    # 5. Generer la recommandation adaptee au diagnostic
+    # 5. Generer la recommandation
     messages = {
         "paludisme": "Suspicion de paludisme. Consultez un medecin rapidement.",
         "grippe": "Suspicion de grippe. Repos et hydratation recommandes.",
@@ -115,10 +167,43 @@ def predict(patient: PatientInput):
         "sain": "Pas de pathologie detectee. Continuez a surveiller."
     }
 
-    # 6. Renvoyer le resultat structure
     return DiagnosticOutput(
         diagnostic=diagnostic,
         probabilite=round(proba_max, 2),
         confiance=confiance,
         message=messages.get(diagnostic, "Consultez un medecin.")
     )
+
+
+@app.post("/explain", response_model=ExplainOutput)
+def explain(data: ExplainInput):
+    """Expliquer un diagnostic en francais avec un LLM."""
+    if not groq_client:
+        return ExplainOutput(
+            explication="Service d'explication indisponible. Cle API non configuree.",
+            modele_llm="aucun"
+        )
+
+    user_prompt = (
+        f"Patient : {data.sexe}, {data.age} ans, region {data.region}\n"
+        f"Temperature : {data.temperature} C\n"
+        f"Diagnostic du modele : {data.diagnostic} "
+        f"(probabilite {data.probabilite:.0%})\n"
+        f"Explique ce resultat au patient."
+    )
+
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=200,
+            temperature=0.3
+        )
+        explication = response.choices[0].message.content
+    except Exception as e:
+        explication = f"Erreur lors de l'appel au LLM : {str(e)}"
+
+    return ExplainOutput(explication=explication)
